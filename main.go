@@ -1,9 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"log"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -12,13 +12,68 @@ import (
 )
 
 func main() {
-	if len(os.Args) != 3 {
-		log.Fatal("invalid args: two cover files required")
-	}
-	firstProfile := directoryCoverageFromProfile(os.Args[1])
-	secondProfile := directoryCoverageFromProfile(os.Args[2])
+	var files fileList
+	var output string
+	//compare := *flag.Bool("compare", false, "whether to show a comparison table")
 
-	fmt.Print(coverageTable(firstProfile, secondProfile))
+	flag.Var(&files, "file", "Coverage file to compare.")
+	flag.StringVar(&output, "output", "csv", "kind of output required from tool")
+
+	flag.Parse()
+	switch output {
+	case "table":
+		if len(files) != 2 {
+			log.Fatal("table can only output coverage from exactly two files")
+		}
+		firstProfile := directoryCoverageFromProfile(files[0])
+		secondProfile := directoryCoverageFromProfile(files[1])
+
+		fmt.Print(coverageTable(firstProfile, secondProfile))
+	case "csv":
+		fmt.Print(coverageCSV(files...))
+
+	default:
+		log.Fatal("output must be set to \"csv\" or \"table\"")
+	}
+
+}
+
+func coverageCSV(profileFiles ...string) string {
+	const tableRowSprintf = "%s, %s, %s\n"
+	var buf strings.Builder
+
+	profiles := []profile{}
+	for _, filename := range profileFiles {
+		profiles = append(profiles, directoryCoverageFromProfile(filename))
+	}
+	dirs := directoryList(profiles...)
+	for _, name := range dirs {
+		var s []string
+		for _, prof := range profiles {
+			if _, ok := prof[name]; !ok {
+				prof[name] = &directory{coveredStatements: -1, totalStatements: 1}
+			}
+			s = append(s, fmt.Sprintf("%d,%d", prof[name].coveredStatements, prof[name].totalStatements))
+		}
+
+		buf.WriteString(fmt.Sprintf("%s,%s\n", name, strings.Join(s, ",")))
+	}
+	return buf.String()
+}
+
+type fileList []string
+
+func (f *fileList) String() string {
+	var s string
+	for _, item := range *f {
+		s = fmt.Sprintf(s, item)
+	}
+	return s
+}
+
+func (f *fileList) Set(value string) error {
+	*f = append(*f, value)
+	return nil
 }
 
 func coverageTable(first, second profile) string {
@@ -64,7 +119,7 @@ func description(first, second float64) string {
 	return fmt.Sprintf("%+6.2f%%", second-first)
 }
 
-func directoryList(profiles ...map[string]*directory) []string {
+func directoryList(profiles ...profile) []string {
 	set := map[string]struct{}{}
 	for _, p := range profiles {
 		for name, _ := range p {
