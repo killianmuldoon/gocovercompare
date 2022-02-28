@@ -6,6 +6,7 @@ import (
 	"log"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/cover"
@@ -22,13 +23,7 @@ func main() {
 	flag.Parse()
 	switch output {
 	case "table":
-		if len(files) != 2 {
-			log.Fatal("table can only output coverage from exactly two files")
-		}
-		firstProfile := directoryCoverageFromProfile(files[0])
-		secondProfile := directoryCoverageFromProfile(files[1])
-
-		fmt.Print(coverageTable(firstProfile, secondProfile))
+		fmt.Print(coverageTable(files...))
 	case "csv":
 		fmt.Print(coverageCSV(files...))
 
@@ -39,7 +34,6 @@ func main() {
 }
 
 func coverageCSV(profileFiles ...string) string {
-	const tableRowSprintf = "%s, %s, %s\n"
 	var buf strings.Builder
 
 	profiles := []profile{}
@@ -76,36 +70,44 @@ func (f *fileList) Set(value string) error {
 	return nil
 }
 
-func coverageTable(first, second profile) string {
-	var buf strings.Builder
+func coverageTable(profileFiles ...string) string {
 
-	const tableRowSprintf = "%-80s %8s %8s %8s\n"
-	buf.WriteString(fmt.Sprintf(tableRowSprintf, "package", "first", "second", "change"))
-	buf.WriteString(fmt.Sprintf(tableRowSprintf, "-------", "------", "-----", "-----"))
-
-	packages := directoryList(first, second)
-
-	for _, name := range packages {
-		if _, ok := first[name]; !ok {
-			first[name] = &directory{coveredStatements: -1, totalStatements: 1}
-		}
-		if _, ok := second[name]; !ok {
-			second[name] = &directory{coveredStatements: -1, totalStatements: 1}
-		}
-		buf.WriteString(fmt.Sprintf(tableRowSprintf,
-			name,
-			first[name].coverageString(),
-			second[name].coverageString(),
-			description(first[name].coverage(), second[name].coverage())))
+	profiles := []profile{}
+	for _, filename := range profileFiles {
+		profiles = append(profiles, directoryCoverageFromProfile(filename))
 	}
+	tableWriter, rowFormat := generateHeader(profileFiles...)
+	dirs := directoryList(profiles...)
+	for _, name := range dirs {
+		var rowValues []interface{}
+		rowValues = append(rowValues, name)
 
-	buf.WriteString(fmt.Sprintf("%80s %8s %8s %8s\n",
-		"total:",
-		first.coverageString(),
-		second.coverageString(),
-		description(first.coverage(), second.coverage()),
-	))
-	return buf.String()
+		for _, prof := range profiles {
+
+			if _, ok := prof[name]; !ok {
+				prof[name] = &directory{coveredStatements: -1, totalStatements: 1}
+			}
+			rowValues = append(rowValues, prof[name].coverageString())
+		}
+		tableWriter.WriteString(fmt.Sprintf(rowFormat, rowValues...))
+	}
+	return tableWriter.String()
+}
+
+func generateHeader(profileFiles ...string) (*strings.Builder, string) {
+	var buf strings.Builder
+	rowFormat := "%-80s"
+	line1 := []interface{}{"package"}
+	line2 := []interface{}{"--------"}
+	for i, _ := range profileFiles {
+		rowFormat = rowFormat + " %8s"
+		line1 = append(line1, strconv.Itoa(i+1))
+		line2 = append(line2, "------")
+	}
+	rowFormat = rowFormat + "\n"
+	buf.WriteString(fmt.Sprintf(rowFormat, line1...))
+	buf.WriteString(fmt.Sprintf(rowFormat, line2...))
+	return &buf, rowFormat
 }
 
 func description(first, second float64) string {
